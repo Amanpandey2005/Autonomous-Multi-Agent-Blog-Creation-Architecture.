@@ -1,0 +1,176 @@
+# Demystifying Self-Attention: A Deep Dive into Transformer Mechanics
+
+## Understanding the Need for Self-Attention in Sequence Processing
+
+Before the advent of attention mechanisms, sequence modeling relied heavily on Recurrent Neural Networks (RNNs) and Convolutional Neural Networks (CNNs)—both of which impose fundamental architectural limitations on learning sequence representations.
+
+RNNs, including variant architectures like LSTMs and GRUs, process inputs sequentially by propagating a hidden state step-by-step through time. This sequential nature creates a major computational bottleneck: information from early tokens must travel through every intermediate state to reach later steps. Consequently, signal degradation caused by vanishing or exploding gradients makes capturing long-range dependencies difficult, while the recurrent dependency prevents parallel execution across the time dimension.
+
+CNNs alleviate the parallelization constraint by processing local token windows simultaneously, but they struggle with global context. Because a standard convolutional filter operates within a fixed receptive field, relating two distant tokens requires stacking multiple layers to expand that field. Achieving global sequence context thus demands significant network depth, which increases memory consumption and complicates gradient flow across deep layers.
+
+Self-attention addresses these bottlenecks by serving as a mechanism for dynamic contextual representation. Instead of compressing history into a fixed-size recurrent state or relying on local receptive fields, self-attention calculates context weights dynamically based on the semantic interactions within the sequence. Each token's final representation is constructed as a dynamically weighted sum of all other tokens, tailored to their immediate relevance.
+
+Crucially, self-attention establishes direct pairwise connections between every position in the input sequence. This reduces the path length for information transfer between any two words to $O(1)$ operations, enabling efficient long-range dependency capture, optimal gradient propagation, and full parallelization during training.
+
+## Demystifying Queries, Keys, and Values
+
+To grasp how transformers contextualize sequence elements, it is instructive to draw an analogy from classical information retrieval. In a traditional database system, you submit a **Query** to match against indexed **Keys**. When a key matches your query, the system retrieves the corresponding **Value**. Self-attention operates as a soft, differentiable generalization of this operation: rather than executing a hard binary lookup that returns a single entry, it performs a continuous retrieval that dynamically blends values across the entire sequence.
+
+This soft retrieval mechanism requires projecting raw input embeddings into distinct functional subspaces. Given an input sequence matrix $X \in \mathbb{R}^{N \times d_{\text{model}}}$, we apply three independent, learned linear transformations using weight matrices $W_Q, W_K \in \mathbb{R}^{d_{\text{model}} \times d_k}$ and $W_V \in \mathbb{R}^{d_{\text{model}} \times d_v}$:
+
+- **Query Matrix ($Q = X W_Q$):** Encodes what a token is actively seeking from its surrounding context.
+- **Key Matrix ($K = X W_K$):** Encodes the features or properties a token advertises to potential queries.
+- **Value Matrix ($V = X W_V$):** Contains the actual semantic information to be passed downstream once attention is established.
+
+The primary interaction between tokens occurs through the inner product of Query and Key vectors. Geometrically, the dot product $q_i \cdot k_j^T$ measures the directional alignment and magnitude overlap between token $i$'s query and token $j$'s key within their transformed subspace. Physically, this scalar quantifies the raw affinity or relevance between the two tokens—answering how much information token $i$ should request from token $j$.
+
+Finally, these inner products are scaled and passed through a softmax function to produce normalized attention weights ($\alpha_{ij}$). These weights act as coefficients to aggregate the Value vectors. The resulting output for token $i$ is calculated as a weighted linear sum: $z_i = \sum_{j} \alpha_{ij} v_j$. By taking this convex combination, self-attention selectively extracts and condenses the pertinent semantic content stored in $V$, yielding a contextualized representation for every token in the sequence.
+
+## Step-by-Step Mathematical Derivation of Scaled Dot-Product Attention
+
+At the heart of the Transformer architecture lies the scaled dot-product attention mechanism, mathematically formalized as:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+
+> **[IMAGE GENERATION FAILED]** Architectural flowchart of Scaled Dot-Product Attention, detailing tensor operations from Query, Key, and Value inputs to contextual outputs.
+>
+> **Alt:** Diagram of Scaled Dot-Product Attention pipeline showing computational steps from Q, K, V inputs to context output.
+>
+> **Prompt:** A clean, modern technical architecture flowchart of Scaled Dot-Product Attention. Top inputs: Q (Query), K (Key), V (Value). The diagram shows data flowing down: Q and K transposed pass into a Matrix Multiply block producing scores, followed by a Scale block (divide by sqrt(d_k)), an optional Mask block, a Softmax block producing attention weights matrix, and a final Matrix Multiply block combining attention weights with V to produce the Context Output vector. Clear arrows, distinct clean colored module boxes, clear labels, light neutral background, high legibility.
+>
+> **Error:** 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-3.6-flash-image is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}
+
+
+To understand how this operation captures contextual dependencies across sequence elements, we can decompose the formula into four sequential mathematical steps.
+
+### 1. Matrix Multiplication of Query ($Q$) and Transposed Key ($K^T$)
+Given an input sequence of length $N$, we project the token representations into Query ($Q \in \mathbb{R}^{N \times d_k}$), Key ($K \in \mathbb{R}^{N \times d_k}$), and Value ($V \in \mathbb{R}^{N \times d_v}$) matrices. The operation begins by multiplying $Q$ by the transpose of $K$:
+
+$$S = Q K^T \in \mathbb{R}^{N \times N}$$
+
+Each entry $S_{i,j} = q_i \cdot k_j^T$ represents the raw, unscaled dot product between the query vector of token $i$ and the key vector of token $j$. Geometrically, this measures the degree of directional alignment and semantic correlation between two sequence positions.
+
+### 2. Scaling by $\sqrt{d_k}$ to Mitigate Vanishing Gradients
+As the key dimension $d_k$ grows, the magnitude of the dot products increases. Assuming components of $q_i$ and $k_j$ are independent random variables with zero mean and unit variance, their inner product yields a mean of 0 and a variance of $d_k$. Large input values push the subsequent $\text{softmax}$ function into regions with extremely small gradients, leading to saturation and vanishing gradients during backpropagation. Scaling the scores by $\frac{1}{\sqrt{d_k}}$ normalizes the variance back to 1:
+
+$$\hat{S} = \frac{QK^T}{\sqrt{d_k}}$$
+
+### 3. Row-Wise Softmax Normalization
+To convert scaled logits into valid probability distributions, we apply the $\text{softmax}$ function independently across each row $i$ of matrix $\hat{S}$:
+
+$$A_{i,j} = \text{softmax}(\hat{S})_{i,j} = \frac{\exp(\hat{S}_{i,j})}{\sum_{m=1}^{N} \exp(\hat{S}_{i,m})}$$
+
+The output matrix $A \in \mathbb{R}^{N \times N}$ represents the attention weights, where each row sums to 1 ($\sum_j A_{i,j} = 1$). The value $A_{i,j}$ explicitly quantifies how much focus token $i$ assigns to token $j$.
+
+### 4. Computing Contextual Output Representations via Value ($V$) Multiplication
+Finally, we compute the output matrix $O \in \mathbb{R}^{N \times d_v}$ by multiplying the normalized attention weights $A$ by the Value matrix $V$:
+
+$$O = A V$$
+
+For each position $i$, the output vector $o_i$ is a weighted linear combination of all value vectors in $V$, dynamic to the context of the entire sequence.
+
+## Expanding to Multi-Head Attention for Richer Representations
+
+Single-head scaled dot-product attention computes a single set of attention weights across the entire hidden dimension. However, this approach averages feature interactions, effectively smoothing over distinct contextual nuances. A single sequence position often needs to simultaneously capture multiple types of relationships—such as syntactic dependencies (e.g., subject-verb alignment) and long-range semantic associations (e.g., coreference resolution). Multi-Head Attention (MHA) overcomes this limitation by allowing the network to jointly attend to information from different representation subspaces at different positions.
+
+To create these distinct subspaces, MHA linearly projects the input queries ($Q$), keys ($K$), and values ($V$) $h$ times using parameter matrices learned independently for each head $i$:
+
+$$Q_i = Q W_i^Q, \quad K_i = K W_i^K, \quad V_i = V W_i^V$$
+
+Here, $W_i^Q \in \mathbb{R}^{d_{\text{model}} \times d_k}$, $W_i^K \in \mathbb{R}^{d_{\text{model}} \times d_k}$, and $W_i^V \in \mathbb{R}^{d_{\text{model}} \times d_v}$. Typically, the projection dimensions are set to $d_k = d_v = d_{\text{model}} / h$. By scaling down the per-head projection dimension, the computational complexity of MHA remains comparable to performing single-head attention over full $d_{\text{model}}$-dimensional vectors.
+
+Once projected, scaled dot-product attention is executed in parallel across all $h$ heads:
+
+$$\text{head}_i = \text{Attention}(Q_i, K_i, V_i) = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i$$
+
+Tensor libraries efficiently execute these parallel computations by reshaping input matrices into four-dimensional tensors of shape `[batch_size, num_heads, seq_len, head_dim]`, allowing accelerator hardware to compute attention maps for all heads in a single vectorized pass.
+
+Finally, the output matrices $\text{head}_1, \dots, \text{head}_h$ (each of shape $[\text{seq\_len}, d_v]$) are concatenated along the feature dimension to restore the original feature dimension size ($h \cdot d_v = d_{\text{model}}$). This concatenated matrix is then projected through a learned output parameter matrix $W^O \in \mathbb{R}^{d_{\text{model}} \times d_{\text{model}}}$:
+
+$$\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h) W^O$$
+
+> **[IMAGE GENERATION FAILED]** Multi-Head Attention mechanism demonstrating linear projection into h distinct subspaces, parallel attention execution, concatenation, and output transformation.
+>
+> **Alt:** Diagram of Multi-Head Attention architecture illustrating parameter projection into multiple heads, parallel execution, concatenation, and final projection.
+>
+> **Prompt:** A technical architecture block diagram of Multi-Head Attention. Inputs V, K, Q enter at the bottom, branch into multiple parallel projection heads labeled Head 1, Head 2, through Head h. Each head contains its own Scaled Dot-Product Attention block. The outputs from all h heads converge into a single Concatenation block, which feeds into a final Linear layer labeled W_O. Clean layout, dark grey text on light background, subtle color coding per head, modern deep learning system architecture style.
+>
+> **Error:** 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-3.6-flash-image is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.', 'status': 'NOT_FOUND'}}
+
+
+This linear transformation integrates the localized relational signals extracted by individual heads back into a unified, high-dimensional representation suitable for downstream transformer layers.
+
+## Implementing Self-Attention in PyTorch from Scratch
+
+Translating the mathematical formulation of scaled dot-product attention into PyTorch code requires a precise understanding of tensor shape dynamics and linear projections. In deep learning architectures, attention mechanisms allow sequence representations to dynamically weigh interactions between tokens. Below, we implement a single-head self-attention module from scratch using standard PyTorch primitives.
+
+### Parameter Initialization and Layer Definitions
+
+In the module's `__init__` constructor, we define the core hyper-parameters: `embed_dim` (the dimensionality of the input vectors) and `d_k` (the internal projection dimension for queries and keys). We initialize three separate linear transformation layers—`w_q`, `w_k`, and `w_v`—which project the incoming token embeddings into Query, Key, and Value representations, respectively. An additional linear projection layer, `w_o`, maps the aggregated contextual outputs back to the original embedding space.
+
+### Forward Pass and Tensor Transformations
+
+The `forward` pass accepts an input tensor `x` with shape `(batch_size, seq_len, embed_dim)`. During execution, passing `x` through the linear projection layers yields the $Q$, $K$, and $V$ matrices, each transformed to shape `(batch_size, seq_len, d_k)`. Maintaining strict control over these dynamic dimensions is essential for aligning sequence operations in batched computations.
+
+### Scaled Dot-Product Computation via `torch.matmul`
+
+To evaluate relationships between token positions, we compute the inner product between queries and keys using `torch.matmul(Q, K.transpose(-2, -1))`. This step generates an unnormalized attention matrix of shape `(batch_size, seq_len, seq_len)`. Because larger projection dimensions ($d_k$) can cause dot products to grow large in magnitude—pushing the softmax function into regions with extremely small gradients—we scale the raw attention scores by $\frac{1}{\sqrt{d_k}}$.
+
+### Causal Masking for Autoregressive Scenarios
+
+In autoregressive tasks, such as language generation decoders, tokens must not attend to future context. We accommodate this by accepting an optional boolean `mask` tensor. Using `torch.Tensor.masked_fill`, positions where the mask condition evaluates to `False` are replaced with `-inf`. When applying `F.softmax`, these negative infinite values convert to zero probability, preserving causality. Finally, multiplying the attention distribution by $V$ computes the weighted sum over context vectors.
+
+```python
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ScaledDotProductSelfAttention(nn.Module):
+    def __init__(self, embed_dim: int, d_k: int):
+        super().__init__()
+        self.d_k = d_k
+        # Initialize projection layers for Q, K, V, and Output
+        self.w_q = nn.Linear(embed_dim, d_k, bias=False)
+        self.w_k = nn.Linear(embed_dim, d_k, bias=False)
+        self.w_v = nn.Linear(embed_dim, d_k, bias=False)
+        self.w_o = nn.Linear(d_k, embed_dim, bias=False)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        batch_size, seq_len, _ = x.shape
+        
+        # 1. Project inputs to Q, K, V tensors (batch_size, seq_len, d_k)
+        Q = self.w_q(x)
+        K = self.w_k(x)
+        V = self.w_v(x)
+        
+        # 2. Batched matrix multiplication for attention scores
+        # Resulting shape: (batch_size, seq_len, seq_len)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        
+        # 3. Apply optional causal or padding mask
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+            
+        # 4. Softmax normalization and value aggregation
+        attn_weights = F.softmax(scores, dim=-1)
+        context = torch.matmul(attn_weights, V)  # (batch_size, seq_len, d_k)
+        
+        return self.w_o(context)
+```
+
+## Evaluating Time Complexity and Positional Encodings
+
+### Quadratic Bottlenecks in Attention
+For an input sequence of length $N$ with embedding dimension $d$, standard scaled dot-product attention computes the matrix product $QK^\top \in \mathbb{R}^{N \times N}$. Calculating pairwise similarities requires $O(N^2 d)$ time complexity and mandates storing an $N \times N$ matrix in memory for softmax normalization and backpropagation. Consequently, both time and memory scale quadratically with sequence length $N$. While the $d$ dimension parallelizes efficiently on GPUs, the $O(N^2)$ memory footprint creates a severe hardware bottleneck as context windows expand.
+
+### Permutation Invariance and Sequence Order
+Unlike recurrent or convolutional operations, self-attention treats input tokens as an unordered set of vectors. Because token interactions rely solely on content-based inner products, permuting the input sequence yields identically permuted outputs. To break this inherent permutation invariance and inform the model of sequential order, we must explicitly inject positional encodings.
+
+### Taxonomy of Positional Encodings
+- **Sinusoidal Encodings:** Use deterministic sine and cosine functions of varying frequencies. They add no trainable parameters and theoretically allow deterministic extrapolation to unobserved sequence lengths.
+- **Learned Encodings:** Assign a trainable vector to each absolute position. While highly flexible within a fixed context window, they cannot extrapolate beyond their pre-allocated maximum length.
+- **Relative and Rotary Encodings:** Inject positional offset directly into token interactions (e.g., RoPE, ALiBi) by modifying Query-Key dot products based on pairwise distance. These approaches offer superior length generalization and spatial resolution.
+
+### Deploying Self-Attention for Long Contexts
+Scaling self-attention in production requires mitigating the $O(N^2)$ memory footprint. Engineers rely on IO-aware exact attention algorithms like FlashAttention to reduce high-bandwidth memory transfers, alongside rotary position embeddings that support context extension techniques. Combining hardware-level optimizations with relative encoding schemes ensures stable inference and training over extended context lengths.
