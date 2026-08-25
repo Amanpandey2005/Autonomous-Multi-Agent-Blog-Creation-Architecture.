@@ -124,9 +124,9 @@ class State(TypedDict):
 #   TAVILY_API_KEY=your_key_here
 #   HF_TOKEN=your_huggingface_token_here   (free, from https://huggingface.co/settings/tokens)
 import os
-os.environ["GOOGLE_API_KEY"] = "AQ.Ab8RN6ILPq08Cgve4uq6_lAyuwC8VO5VrUd9Skpvv0pRX7NGiA"
-os.environ["TAVILY_API_KEY"] = "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"
-os.environ["HF_TOKEN"] = "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"  # optional, for Hugging Face image generation
+os.environ["GOOGLE_API_KEY"] = "AQ.AXXXXXXXXX"
+os.environ["TAVILY_API_KEY"] = "tvlXXXXXXXXXXXXXX"
+os.environ["HF_TOKEN"] = "hf_XXXXXXXXXXXX"  # optional, for Hugging Face image generation
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.5-flash-lite"
